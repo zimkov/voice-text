@@ -1,6 +1,7 @@
 # backend/main.py
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 import librosa
 import soundfile as sf
 import numpy as np
@@ -15,6 +16,8 @@ import torch
 import ffmpeg
 import logging
 import warnings
+from tts_utils import tts_engine
+import time
 
 # Подавляем предупреждения о deprecated функциях
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -228,3 +231,36 @@ async def health_check():
         "task": model.generation_config.task,
         "model_version": model.config._commit_hash if hasattr(model.config, '_commit_hash') else "unknown"
     }
+
+
+
+class TTSRequest(BaseModel):
+    text: str
+    speaker: str = "aidar"  # aidar, baya, kseniya, xenia, eugene, random
+
+@app.post("/synthesize-speech/")
+async def synthesize_speech(request: TTSRequest):
+    """Синтез речи из текста"""
+    try:
+        if not request.text.strip():
+            raise HTTPException(status_code=400, detail="Пустой текст для озвучки")
+        
+        # Ограничение длины текста
+        if len(request.text) > 1000:
+            raise HTTPException(status_code=400, detail="Текст слишком длинный (максимум 1000 символов)")
+        
+        # Генерация аудио
+        audio_data = tts_engine.synthesize(request.text, request.speaker)
+        
+        # Возврат аудио файла
+        return Response(
+            content=audio_data,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"attachment; filename=speech_{int(time.time())}.wav"
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
